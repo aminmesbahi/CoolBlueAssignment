@@ -77,6 +77,7 @@ namespace Insurance.Tests
             );
         }
 
+        [Fact]
         public void CalculateInsurance_GivenSmartphoneSalesPriceLessThan500Euros_ShouldAdd500EurosToInsuranceCost()
         {
             const float expectedInsuranceValue = 500;
