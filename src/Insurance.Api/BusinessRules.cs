@@ -1,10 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Net.Http;
 using Insurance.Api.Controllers;
 using Newtonsoft.Json;
+using System;
+using System.Net.Http;
 
 namespace Insurance.Api
 {
@@ -12,7 +9,7 @@ namespace Insurance.Api
     {
         public static void GetProductType(string baseAddress, int productID, ref HomeController.InsuranceDto insurance)
         {
-            HttpClient client = new HttpClient{ BaseAddress = new Uri(baseAddress)};
+            HttpClient client = new HttpClient { BaseAddress = new Uri(baseAddress) };
             string json = client.GetAsync("/product_types").Result.Content.ReadAsStringAsync().Result;
             var collection = JsonConvert.DeserializeObject<dynamic>(json);
 
@@ -37,7 +34,7 @@ namespace Insurance.Api
 
         public static void GetSalesPrice(string baseAddress, int productID, ref HomeController.InsuranceDto insurance)
         {
-            HttpClient client = new HttpClient{ BaseAddress = new Uri(baseAddress)};
+            HttpClient client = new HttpClient { BaseAddress = new Uri(baseAddress) };
             string json = client.GetAsync(string.Format("/products/{0:G}", productID)).Result.Content.ReadAsStringAsync().Result;
             var product = JsonConvert.DeserializeObject<dynamic>(json);
 
