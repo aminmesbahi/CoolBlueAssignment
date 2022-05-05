@@ -1,12 +1,12 @@
 ﻿namespace Insurance.Api.Models;
 public class Product
 {
-    public Product(int _id, string _name, int _productTypeId, decimal _salesPrice)
+    public Product(int id, string name, int productTypeId, decimal salesPrice)
     {
-        Id = _id;
-        Name = _name;
-        ProductTypeId = _productTypeId;
-        SalesPrice = _salesPrice;
+        Id = id;
+        Name = name;
+        ProductTypeId = productTypeId;
+        SalesPrice = salesPrice;
     }
     public Product()
     {

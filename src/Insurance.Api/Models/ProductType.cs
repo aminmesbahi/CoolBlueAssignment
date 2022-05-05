@@ -4,11 +4,11 @@ namespace Insurance.Api.Models;
 
 public class ProductType
 {
-    public ProductType(int _id, string _name, bool _canBeInsured)
+    public ProductType(int id, string name, bool canBeInsured)
     {
-        Id = _id;
-        Name = _name;
-        CanBeInsured = _canBeInsured;
+        Id = id;
+        Name = name;
+        CanBeInsured = canBeInsured;
     }
     public ProductType()
     {
@@ -17,5 +17,5 @@ public class ProductType
     public int Id { get; set; }
     public string Name { get; set; }
     public bool CanBeInsured { get; set; }
-    public Dictionary<string, decimal> SurchargeRates { get; set; }
+    public ICollection<SurchargeItem> SurchargeItems { get; set; }
 }

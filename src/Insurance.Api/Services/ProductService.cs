@@ -2,8 +2,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Net.Http.Headers;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
@@ -13,45 +11,68 @@ namespace Insurance.Api.Services;
 public class ProductService : IProductService, IDisposable
 {
     private readonly HttpClient _httpClient;
-    private readonly IConfiguration _configuration;
 
     public ProductService(HttpClient httpClient, IConfiguration configuration)
     {
         _httpClient = httpClient;
-        _configuration = configuration;
-        _httpClient.BaseAddress = new Uri(_configuration.GetSection("ProductApi").Value);
+        _httpClient.BaseAddress = new Uri(configuration.GetSection("ProductApi").Value);
 
         _httpClient.DefaultRequestHeaders.Add(
             HeaderNames.Accept, "application/json");
         _httpClient.DefaultRequestHeaders.Add(
             HeaderNames.UserAgent, "CoolBlueInsurance");
     }
-
-    public async Task<InsuranceDto> GetProductInsuranceInfo(int productID)
+    public async Task<InsuranceDto> GetProductInsuranceInfo(int productId)
     {
-        var productTypes = await _httpClient.GetFromJsonAsync<IEnumerable<ProductType>>(
-            "product_types");
-
-        var product = await _httpClient.GetFromJsonAsync<Product>(string.Format("/products/{0:G}", productID));
-        var productType = productTypes.Where(pt => pt.Id == product.ProductTypeId).FirstOrDefault();
-        var insurance = new InsuranceDto();
-        if (productType != null && product != null)
+        InsuranceDto insuranceInfo;
+        Product product;
+        ProductType productType = null;
+        try
         {
-            insurance.ProductTypeName = productType.Name;
-            insurance.ProductTypeHasInsurance = productType.CanBeInsured;
-            insurance.ProductId = productID;
-            insurance.InsuranceValue = 0;
-            insurance.SalesPrice = product.SalesPrice;
+            product = await _httpClient.GetFromJsonAsync<Product>($"/products/{productId}");
+            if (product != null)
+                productType = await _httpClient.GetFromJsonAsync<ProductType>($"product_types/{product.ProductTypeId}");
+        }
+        catch
+        {
+            return default;
+        }
+        if (productType != null)
+        {
+            insuranceInfo = new InsuranceDto(productId, productType.Id, productType.Name, productType.CanBeInsured, product.SalesPrice);
         }
         else
         {
             throw new Exception(message: "The given product with proper product type didn't found!\nProduct id: {productID}, Product type id: {product.ProductTypeId}");
         }
-        return insurance;
+        return insuranceInfo;
     }
-
+    public async Task<bool> IsProductTypeExistsAsync(int productTypeId)
+    {
+        try
+        {
+            var statusCode = (await _httpClient.GetAsync($"product_types/{productTypeId}")).StatusCode;
+            return statusCode == System.Net.HttpStatusCode.OK;
+        }
+        catch (Exception ex)
+        {
+            throw new Exception(message: ex.Message);
+        }
+    }
+    public async Task<bool> IsProductExistsAsync(int productId)
+    {
+        try
+        {
+            var statusCode = (await _httpClient.GetAsync($"products/{productId}")).StatusCode;
+            return statusCode == System.Net.HttpStatusCode.OK;
+        }
+        catch (Exception ex)
+        {
+            throw new Exception(message: ex.Message);
+        }
+    }
     public void Dispose()
     {
-        _httpClient?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

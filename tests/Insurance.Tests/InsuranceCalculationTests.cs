@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Moq;
 using Moq.Contrib.HttpClient;
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Xunit;
@@ -12,12 +13,18 @@ namespace Insurance.Tests;
 
 public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
 {
-    IInsuranceCalculationService _insuranceService;
-    readonly ProductServiceFixture _fixture;
-    public InsuranceCalculationTests(ProductServiceFixture fixture)
+    private readonly IInsuranceCalculationService _insuranceService;
+
+    public InsuranceCalculationTests(ProductServiceFixture productServiceFixture)
     {
-        _fixture = fixture;
-        _insuranceService = new InsuranceCalculationService(new ProductService(_fixture.Client.CreateClient(), _fixture.Config.Object));
+        var productServiceFixture1 = productServiceFixture;
+        var surchargeServiceMock = new Mock<ISurchargeService>();
+        surchargeServiceMock
+            .Setup(s => s.GetProductTypeSurcharges(It.IsAny<int>()))
+            .Returns<int>((a) => new SurchargeDto(a, TestData.Surcharges.Where(s => s.ProductTypeId == a).OrderBy(e => e.Id).Select(e => new SurchargeItem(e.Title, e.SurchargeRate)).ToList()));
+        var surchargeService = surchargeServiceMock.Object;
+        _insuranceService = new InsuranceCalculationService(new ProductService(productServiceFixture1.Client.CreateClient(), productServiceFixture1.Config.Object),
+            surchargeService);
     }
 
     #region Tests for Order Insurance Calculation
@@ -27,16 +34,15 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 2000;
 
-        var dto = new Order
+        var dto = new OrderRequestDto
         {
-            Id = 1,
-            Items = new[] { new OrderItem { Item = new InsuranceDto { ProductId = 1 }, Quantity = 1 }, new OrderItem { Item = new InsuranceDto { ProductId = 2 }, Quantity = 1 } }
+            Items = new[] { new OrderRequestItem { ProductId = 1, Quantity = 1 }, new OrderRequestItem { ProductId = 2, Quantity = 1 } }
         };
         var result = await _insuranceService.CalculateOrderInsuranceAsync(dto);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
-            actual: result.TotalInsuranceCost
+            actual: result.TotalInsuranceValue
         );
     }
     [Fact]
@@ -45,16 +51,15 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 500;
 
-        var dto = new Order
+        var dto = new OrderRequestDto
         {
-            Id = 1,
-            Items = new[] { new OrderItem { Item = new InsuranceDto { ProductId = 1 }, Quantity = 1 }, new OrderItem { Item = new InsuranceDto { ProductId = 7 }, Quantity = 1 } }
+            Items = new[] { new OrderRequestItem { ProductId = 1, Quantity = 1 }, new OrderRequestItem { ProductId = 7, Quantity = 1 } }
         };
         var result = await _insuranceService.CalculateOrderInsuranceAsync(dto);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
-            actual: result.TotalInsuranceCost
+            actual: result.TotalInsuranceValue
         );
     }
 
@@ -64,16 +69,15 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 1000;
 
-        var dto = new Order
+        var dto = new OrderRequestDto
         {
-            Id = 1,
-            Items = new[] { new OrderItem { Item = new InsuranceDto { ProductId = 1 }, Quantity = 2 }, new OrderItem { Item = new InsuranceDto { ProductId = 7 }, Quantity = 2 } }
+            Items = new[] { new OrderRequestItem { ProductId = 1, Quantity = 2 }, new OrderRequestItem { ProductId = 7, Quantity = 2 } }
         };
         var result = await _insuranceService.CalculateOrderInsuranceAsync(dto);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
-            actual: result.TotalInsuranceCost
+            actual: result.TotalInsuranceValue
         );
     }
     [Fact]
@@ -82,16 +86,15 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 2500;
 
-        var dto = new Order
+        var dto = new OrderRequestDto
         {
-            Id = 1,
-            Items = new[] { new OrderItem { Item = new InsuranceDto { ProductId = 1 }, Quantity = 2 }, new OrderItem { Item = new InsuranceDto { ProductId = 14 }, Quantity = 1 } }
+            Items = new[] { new OrderRequestItem { ProductId = 1, Quantity = 2 }, new OrderRequestItem { ProductId = 14, Quantity = 1 } }
         };
         var result = await _insuranceService.CalculateOrderInsuranceAsync(dto);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
-            actual: result.TotalInsuranceCost
+            actual: result.TotalInsuranceValue
         );
     }
     [Fact]
@@ -100,16 +103,15 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 1500;
 
-        var dto = new Order
+        var dto = new OrderRequestDto
         {
-            Id = 1,
-            Items = new[] { new OrderItem { Item = new InsuranceDto { ProductId = 13 }, Quantity = 1 }, new OrderItem { Item = new InsuranceDto { ProductId = 14 }, Quantity = 1 } }
+            Items = new[] { new OrderRequestItem { ProductId = 13, Quantity = 1 }, new OrderRequestItem { ProductId = 14, Quantity = 1 } }
         };
         var result = await _insuranceService.CalculateOrderInsuranceAsync(dto);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
-            actual: result.TotalInsuranceCost
+            actual: result.TotalInsuranceValue
         );
     }
     #endregion Tests for Order Insurance Calculation
@@ -117,109 +119,121 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     #region Tests for laptops and smartphones
     [Fact]
     [Trait("Product", "Laptop&SmartPhone")]
-    public async Task CalculateProductInsurance_GivenLaptopSalesPriceLessThan500Euros_ShouldAdd500EurosToInsuranceCost()
+    public async Task CalculateProductInsurance_GivenLaptopSalesPriceLessThan500Euros_ShouldAdd500EurosToInsuranceCostAnd300EurosAsSurcharge()
     {
         const decimal expectedInsuranceValue = 500;
+        const decimal expectedSurcharge = 300;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 1,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 1;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
             actual: result.InsuranceValue
         );
+        Assert.Equal(
+            expected: expectedSurcharge,
+            actual: result.TotalSurcharge
+        );
+
     }
 
     [Fact]
     [Trait("Product", "Laptop&SmartPhone")]
-    public async Task CalculateProductInsurance_GivenLaptopSalesPriceBetween500And2000Euros_ShouldAdd1500EurosToInsuranceCost()
+    public async Task CalculateProductInsurance_GivenLaptopSalesPriceBetween500And2000Euros_ShouldAdd1500EurosToInsuranceCostAnd300EurosAsSurcharge()
     {
         const decimal expectedInsuranceValue = 1500;
+        const decimal expectedSurcharge = 300;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 2,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 2;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
             actual: result.InsuranceValue
         );
+        Assert.Equal(
+            expected: expectedSurcharge,
+            actual: result.TotalSurcharge
+        );
     }
 
     [Fact]
     [Trait("Product", "Laptop&SmartPhone")]
-    public async Task CalculateProductInsurance_GivenLaptopSalesPriceGreaterThan2000Euros_ShouldAdd2500EurosToInsuranceCost()
+    public async Task CalculateProductInsurance_GivenLaptopSalesPriceGreaterThan2000Euros_ShouldAdd2500EurosToInsuranceCostAnd300EurosAsSurcharge()
     {
         const decimal expectedInsuranceValue = 2500;
+        const decimal expectedSurcharge = 300;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 3,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 3;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
             actual: result.InsuranceValue
         );
+        Assert.Equal(
+            expected: expectedSurcharge,
+            actual: result.TotalSurcharge
+        );
     }
 
     [Fact]
     [Trait("Product", "Laptop&SmartPhone")]
-    public async Task CalculateProductInsurance_GivenSmartphoneSalesPriceLessThan500Euros_ShouldAdd500EurosToInsuranceCost()
+    public async Task CalculateProductInsurance_GivenSmartphoneSalesPriceLessThan500Euros_ShouldAdd500EurosToInsuranceCostAnd0EurosAsSurcharge()
     {
         const decimal expectedInsuranceValue = 500;
+        const decimal expectedSurcharge = 0;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 4,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 4;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
             actual: result.InsuranceValue
         );
+        Assert.Equal(
+            expected: expectedSurcharge,
+            actual: result.TotalSurcharge
+        );
     }
 
     [Fact]
     [Trait("Product", "Laptop&SmartPhone")]
-    public async Task CalculateProductInsurance_GivenSmartphoneSalesPriceBetween500And2000Euros_ShouldAdd1500EurosToInsuranceCost()
+    public async Task CalculateProductInsurance_GivenSmartphoneSalesPriceBetween500And2000Euros_ShouldAdd1500EurosToInsuranceCostAnd0EurosAsSurcharge()
     {
         const decimal expectedInsuranceValue = 1500;
+        const decimal expectedSurcharge = 0;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 5,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 5;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
             actual: result.InsuranceValue
         );
+        Assert.Equal(
+            expected: expectedSurcharge,
+            actual: result.TotalSurcharge
+        );
     }
 
     [Fact]
     [Trait("Product", "Laptop&SmartPhone")]
-    public async Task CalculateProductInsurance_GivenSmartphoneSalesPriceGreaterThan2000Euros_ShouldAdd2500EurosToInsuranceCost()
+    public async Task CalculateProductInsurance_GivenSmartphoneSalesPriceGreaterThan2000Euros_ShouldAdd2500EurosToInsuranceCostAnd0EurosAsSurcharge()
     {
         const decimal expectedInsuranceValue = 2500;
-
-        var dto = new InsuranceDto
-        {
-            ProductId = 6,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        const decimal expectedSurcharge = 0;
+        var productId = 6;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
             actual: result.InsuranceValue
+        );
+        Assert.Equal(
+            expected: expectedSurcharge,
+            actual: result.TotalSurcharge
         );
     }
     #endregion Tests for laptops and smartphones
@@ -231,11 +245,8 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 0;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 7,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 7;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
@@ -249,11 +260,8 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 1000;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 8,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 8;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
@@ -267,11 +275,8 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     {
         const decimal expectedInsuranceValue = 2000;
 
-        var dto = new InsuranceDto
-        {
-            ProductId = 9,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 9;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
@@ -286,11 +291,8 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     public async Task CalculateProductInsurance_GivenSalesPriceLessThan500EurosNotInsurable_ShouldAddZeroEurosToInsuranceCost()
     {
         const decimal expectedInsuranceValue = 0;
-        var dto = new InsuranceDto
-        {
-            ProductId = 10,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 10;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
@@ -303,11 +305,8 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     public async Task CalculateProductInsurance_GivenSalesPriceBetween500And2000EurosNotInsurable_ShouldAddZeroEurosToInsuranceCost()
     {
         const decimal expectedInsuranceValue = 0;
-        var dto = new InsuranceDto
-        {
-            ProductId = 11,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 11;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
@@ -320,11 +319,8 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     public async Task CalculateProductInsurance_GivenSalesPriceGreaterThan2000EurosNotInsurable_ShouldAddZeroEurosToInsuranceCost()
     {
         const decimal expectedInsuranceValue = 0;
-        var dto = new InsuranceDto
-        {
-            ProductId = 12,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var productId = 12;
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expectedInsuranceValue,
@@ -332,6 +328,31 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
         );
     }
     #endregion Tests for not insurable products
+
+    #region Tests for Order Insurance + Surcharge Calculation
+    [Fact]
+    [Trait("Order", "Surcharge")]
+    public async Task CalculateOrderInsurance_GivenOrderWithItemsWithSurcharge_ShouldReturn2000EurosToInsuranceCost()
+    {
+        const decimal expectedInsuranceValue = 0;
+        const decimal expectedSurcharge = 800;
+
+        var dto = new OrderRequestDto
+        {
+            Items = new[] { new OrderRequestItem { ProductId = 16, Quantity = 2 } }
+        };
+        var result = await _insuranceService.CalculateOrderInsuranceAsync(dto);
+
+        Assert.Equal(
+            expected: expectedInsuranceValue,
+            actual: result.TotalInsuranceValue
+        );
+        Assert.Equal(
+            expected: expectedSurcharge,
+            actual: result.TotalSurcharge
+        );
+    }
+    #endregion Tests for Order Insurance + Surcharge Calculation
 
     #region Example aggregated tests for laptop and smartphone products
     [Theory]
@@ -344,11 +365,7 @@ public class InsuranceCalculationTests : IClassFixture<ProductServiceFixture>
     [InlineData(6, 2500)]
     public async Task CalculateProductInsurance_GivenProductsSalesPriceLessThan500Euros_ShouldAdd500EurosBasedOnTheirProductTypesToInsuranceCost(int productId, decimal expected)
     {
-        var dto = new InsuranceDto
-        {
-            ProductId = productId,
-        };
-        var result = await _insuranceService.CalculateProductInsuranceAsync(dto);
+        var result = await _insuranceService.CalculateProductInsuranceAsync(productId);
 
         Assert.Equal(
             expected: expected,
@@ -368,7 +385,7 @@ public class ProductServiceFixture
             .Build();
         ProductServiceBaseUrl = config.GetSection("ProductApi").Value;
 
-        Mock<IConfigurationSection> mockSection = new Mock<IConfigurationSection>();
+        Mock<IConfigurationSection> mockSection = new();
         mockSection.Setup(x => x.Value).Returns(ProductServiceBaseUrl);
         Config = new Mock<IConfiguration>();
         Config.Setup(x => x.GetSection(It.Is<string>(k => k == "ProductApi"))).Returns(mockSection.Object);
@@ -376,8 +393,11 @@ public class ProductServiceFixture
         TestData.Init();
         Handler = new Mock<HttpMessageHandler>();
         Client = Handler.CreateClientFactory();
-        Handler.SetupRequest(HttpMethod.Get, $"{ProductServiceBaseUrl}/product_types")
-            .ReturnsResponse(System.Text.Json.JsonSerializer.Serialize(TestData.ProductTypes), "application/json");
+        foreach (var productType in TestData.ProductTypes)
+        {
+            Handler.SetupRequest(HttpMethod.Get, $"{ProductServiceBaseUrl}/product_types/{productType.Id}")
+            .ReturnsResponse(System.Text.Json.JsonSerializer.Serialize(productType), "application/json");
+        }
         foreach (var product in TestData.Products)
         {
             Handler.SetupRequest(HttpMethod.Get, $"{ProductServiceBaseUrl}/products/{product.Id}")
